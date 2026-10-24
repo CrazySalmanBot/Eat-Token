@@ -650,13 +650,11 @@ alt="SXD SHADOW Logo" />
                 // Nickname
 let nickname = '-';
 
-if (result.jwt_decoded?.payload?.nickname) {
-    nickname = decodeNickname(result.jwt_decoded.payload.nickname);
-} else if (result.nickname) {
-    nickname = result.nickname;
+if (typeof result.nickname === 'string' && result.nickname.trim()) {
+nickname = result.nickname.trim();
 }
 
-document.getElementById('nick').innerText = nickname;
+document.getElementById('nick').textContent = nickname;
 
                 // Region
                 let region = '-';
