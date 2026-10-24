@@ -359,6 +359,27 @@
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
         }
+
+        /* Mobile performance + accessibility pass */
+        @media (max-width: 600px), (pointer: coarse) {
+            body { background-attachment: scroll !important; }
+            body::before, body::after { animation: none !important; filter: none !important; }
+            .cyber-card { animation: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+            .cyber-card::after, .btn-grad::after, .paste-pro-btn::after,
+            .tutorial-premium::after, .howto-premium::before,
+            .social-links-premium > a::after { animation: none !important; display: none !important; }
+            .social-icon-btn, .info-item, .paste-pro-btn, .tutorial-premium,
+            .howto-premium, .social-links-premium > a, .btn-grad {
+                animation: none !important;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+                transition-duration: .12s !important;
+            }
+            .cyber-card:hover, .info-item:hover, .social-links-premium > a:hover { transform: none !important; }
+        }
+        #termsModal { overflow-y: auto; }
+        #termsModal > div { max-height: min(82dvh, 680px); overflow-y: auto; overscroll-behavior: contain; }
+
         /* ================= END VISUAL-ONLY LAYER ================= */
 
 
@@ -641,7 +662,7 @@
             <div class="flex flex-col items-center mb-6">
                 <div class="relative w-20 h-20 mb-3 rounded-full p-1 bg-gradient-to-tr from-purple-500 to-fuchsia-500 shadow-[0_0_40px_rgba(217,70,239,0.3)]">
                     <!-- Logo image from user-provided URL -->
-                    <img src="https://i.ibb.co/tM7Skh44/logo.jpg"
+                    <img src="https://i.ibb.co/d4dbBKrQ/IMG-20261024-211041.png"
 class="w-full h-full rounded-full object-cover bg-black"
 alt="SXD SHADOW Logo" />
                 </div>
@@ -727,11 +748,8 @@ alt="SXD SHADOW Logo" />
                         <i class="fas fa-times text-lg"></i>
                     </button>
                 </div>
-                <div class="flex items-center justify-between gap-3 mt-3">
+                <div class="mt-3">
                     <span class="text-[10px] text-gray-500">Supports full URL or raw token</span>
-                    <button type="button" id="pasteBtn" onclick="pasteFromClipboard()" class="paste-pro-btn inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[11px] font-bold tracking-wider">
-                        <i class="fas fa-paste"></i><span>Paste</span>
-                    </button>
                 </div>
             </div>
 
@@ -870,40 +888,7 @@ alt="SXD SHADOW Logo" />
             tokenInp.focus();
         }
 
-        async function pasteFromClipboard() {
-            const pasteBtn = document.getElementById('pasteBtn');
-            const originalHTML = '<i class="fas fa-paste"></i><span>Paste</span>'; 
-            try {
-                if (!navigator.clipboard || !navigator.clipboard.readText) {
-                    throw new Error('Clipboard access is not available in this browser context.');
-                }
-                pasteBtn.disabled = true;
-                pasteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>PASTING...</span>';
-                const clipboardText = await navigator.clipboard.readText();
-                if (!clipboardText.trim()) {
-                    pasteBtn.innerHTML = '<i class="fas fa-circle-exclamation"></i><span>CLIPBOARD EMPTY</span>';
-                    setTimeout(() => { pasteBtn.innerHTML = originalHTML; pasteBtn.disabled = false; }, 1800);
-                    return;
-                }
-                tokenInp.value = clipboardText.trim();
-                tokenInp.dispatchEvent(new Event('input', { bubbles: true }));
-                tokenInp.focus();
-                pasteBtn.innerHTML = '<i class="fas fa-check"></i><span>PASTED SUCCESSFULLY</span>';
-                setTimeout(() => { pasteBtn.innerHTML = originalHTML; pasteBtn.disabled = false; }, 1600);
-            } catch (err) {
-                pasteBtn.innerHTML = originalHTML;
-                pasteBtn.disabled = false;
-                // Browsers require HTTPS and permission for clipboard reading; offer a reliable manual fallback.
-                const manualText = window.prompt('Clipboard permission is unavailable. Paste your copied URL or token here:');
-                if (manualText !== null && manualText.trim()) {
-                    tokenInp.value = manualText.trim();
-                    tokenInp.dispatchEvent(new Event('input', { bubbles: true }));
-                    tokenInp.focus();
-                }
-            }
-        }
-
-        tokenInp.addEventListener("keypress", function(event) {
+        tokenInp.addEventListener("keydown", function(event) {
             if (event.key === "Enter") {
                 event.preventDefault();
                 processToken();
@@ -911,13 +896,20 @@ alt="SXD SHADOW Logo" />
         });
 
         function extractEatToken(input) {
-            if (input.includes('eat=')) {
-                const match = input.match(/[?&]eat=([^&]+)/);
-                if (match && match[1]) {
-                    return match[1];
+            const value = String(input || '').trim();
+            if (!value) return '';
+            try {
+                if (/^https?:\/\//i.test(value)) {
+                    const parsed = new URL(value);
+                    const token = parsed.searchParams.get('eat');
+                    return token ? token.trim() : '';
                 }
+            } catch (_) {
+                return '';
             }
-            return input;
+            // A raw token is accepted only when it does not look like a URL.
+            if (/[\s<>]/.test(value) || value.includes('://')) return '';
+            return value;
         }
 
         function decodeNickname(encoded) {
@@ -1021,7 +1013,7 @@ alt="SXD SHADOW Logo" />
             const eatToken = extractEatToken(input);
             if (!eatToken) {
                 errorTitle.innerText = 'Invalid Input';
-                errorMessage.innerText = 'Please provide a valid URL or eat token.';
+                errorMessage.innerText = 'Enter a raw token or a valid URL containing the eat parameter.';
                 errBox.classList.remove('hidden');
                 return;
             }
@@ -1034,11 +1026,20 @@ alt="SXD SHADOW Logo" />
                 `https://ff-jwt-gen-api.lovable.app/api/public/token?eat_token=${encodeURIComponent(eatToken)}`;
 
             try {
-                const response = await fetch(apiUrl, {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' }
-                });
-                const text = await response.text();
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 20000);
+                let response;
+                let text;
+                try {
+                    response = await fetch(apiUrl, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        signal: controller.signal
+                    });
+                    text = await response.text();
+                } finally {
+                    clearTimeout(timeoutId);
+                }
                 let result;
                 try {
                     result = JSON.parse(text);
@@ -1046,19 +1047,19 @@ alt="SXD SHADOW Logo" />
                     result = { error: 'Invalid JSON response', raw: text };
                 }
 
-                currentResponseData = result;
                 document.getElementById('apiResponseDisplay').innerText = JSON.stringify(result, null, 2);
 
-                // Check for success
-                if (result.success === false || result.error) {
-                    const msg = result.error || result.message || 'Invalid eat token or API error.';
+                // Treat HTTP errors and API-declared errors consistently.
+                if (!response.ok || result.success === false || result.error) {
+                    currentResponseData = null;
+                    const msg = result.error || result.message || `Request failed (HTTP ${response.status}).`;
                     errorTitle.innerText = 'Error';
                     errorMessage.innerText = msg;
                     errBox.classList.remove('hidden');
-                    btn.innerHTML = 'GENERATE ACCESS <i class="fas fa-arrow-right text-xs"></i>';
-                    btn.disabled = false;
                     return;
                 }
+
+                currentResponseData = result;
 
                 // --- Display fields from new API (Level removed) ---
 
@@ -1109,14 +1110,15 @@ alt="SXD SHADOW Logo" />
                 out.classList.remove('hidden');
 
             } catch (error) {
-                console.error('Fetch error:', error);
-                errorTitle.innerText = 'Network Error';
-                errorMessage.innerText = 'Failed to connect to API. Please try again.';
+                errorTitle.innerText = error && error.name === 'AbortError' ? 'Request Timed Out' : 'Network Error';
+                errorMessage.innerText = error && error.name === 'AbortError'
+                    ? 'The server took too long to respond. Please try again later.'
+                    : 'Could not reach the API. Check your connection and try again.';
                 errBox.classList.remove('hidden');
+            } finally {
+                btn.innerHTML = 'GENERATE ACCESS <i class="fas fa-arrow-right text-xs"></i>';
+                btn.disabled = false;
             }
-
-            btn.innerHTML = 'GENERATE ACCESS <i class="fas fa-arrow-right text-xs"></i>';
-            btn.disabled = false;
         }
 
         function openModal(id) {
@@ -1126,6 +1128,12 @@ alt="SXD SHADOW Logo" />
         function closeModal(id) {
             document.getElementById(id).classList.remove('active');
         }
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.active').forEach(modal => modal.classList.remove('active'));
+            }
+        });
 
         const modals = document.querySelectorAll('.modal-overlay');
         for (let i = 0; i < modals.length; i++) {
