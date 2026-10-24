@@ -647,14 +647,16 @@ alt="SXD SHADOW Logo" />
 
                 // --- Display fields from new API (Level removed) ---
 
-                // Nickname (decode base64)
-                let nickname = '-';
-                if (result.jwt_decoded && result.jwt_decoded.payload && result.jwt_decoded.payload.nickname) {
-                    nickname = decodeNickname(result.jwt_decoded.payload.nickname);
-                } else if (result.nickname) {
-                    nickname = result.nickname;
-                }
-                document.getElementById('nick').innerText = nickname;
+                // Nickname
+let nickname = '-';
+
+if (result.jwt_decoded?.payload?.nickname) {
+    nickname = decodeNickname(result.jwt_decoded.payload.nickname);
+} else if (result.nickname) {
+    nickname = result.nickname;
+}
+
+document.getElementById('nick').innerText = nickname;
 
                 // Region
                 let region = '-';
