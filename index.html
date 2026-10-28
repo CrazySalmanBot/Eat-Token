@@ -758,10 +758,18 @@ alt="SXD SHADOW Logo" />
                 GENERATE ACCESS <i class="fas fa-arrow-right text-xs"></i>
             </button>
 
+            <!-- Player banner (shown only when the API returns banner data) -->
+            <div id="bannerContainer" class="hidden animate-in mb-6">
+                <div class="bg-black/40 border border-fuchsia-500/30 rounded-xl p-4">
+                    <div class="text-[10px] font-bold text-fuchsia-400 uppercase tracking-wider mb-3 text-center">Player Banner</div>
+                    <img id="bannerImage" src="" alt="Player Banner" class="w-full rounded-lg" style="max-height:200px;object-fit:contain;background:rgba(0,0,0,.3);" />
+                </div>
+            </div>
+
             <!-- Output -->
             <div id="output" class="hidden animate-in mb-6">
                 <div class="bg-black/40 border border-fuchsia-500/30 rounded-xl p-4 relative overflow-hidden">
-                    <!-- Info grid: Nickname, Region, Account UID (Level removed) -->
+                    <!-- Player profile: nickname, region, UID and level -->
                     <div class="info-grid">
                         <div class="info-item">
                             <div class="label">Nickname</div>
@@ -774,6 +782,10 @@ alt="SXD SHADOW Logo" />
                         <div class="info-item">
                             <div class="label">Account UID</div>
                             <div class="value" id="aid">-</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="label">Level</div>
+                            <div class="value" id="level">-</div>
                         </div>
                     </div>
 
@@ -926,8 +938,8 @@ alt="SXD SHADOW Logo" />
         }
 
         function copyAccessTokenOnly() {
-            if (currentResponseData && currentResponseData.token_access) {
-                copyToClipboard(currentResponseData.token_access, document.getElementById('copyTokenBtn'), 'COPIED!');
+            if (currentResponseData && (currentResponseData.token_access || currentResponseData.access_token)) {
+                copyToClipboard(currentResponseData.token_access || currentResponseData.access_token, document.getElementById('copyTokenBtn'), 'COPIED!');
             } else {
                 const displayElem = document.getElementById('accessTokenDisplay');
                 if (displayElem && displayElem.innerText !== '-' && displayElem.innerText !== '--' && displayElem.innerText !==
@@ -940,8 +952,8 @@ alt="SXD SHADOW Logo" />
         }
 
         function copyJwtTokenOnly() {
-            if (currentResponseData && currentResponseData.token) {
-                copyToClipboard(currentResponseData.token, document.getElementById('copyJwtBtn'), 'JWT COPIED!');
+            if (currentResponseData && (currentResponseData.token || currentResponseData.jwt_token || currentResponseData.jwt)) {
+                copyToClipboard(currentResponseData.token || currentResponseData.jwt_token || currentResponseData.jwt, document.getElementById('copyJwtBtn'), 'JWT COPIED!');
             } else {
                 alert('No JWT token available to copy');
             }
@@ -999,10 +1011,20 @@ alt="SXD SHADOW Logo" />
             const errBox = document.getElementById('error-box');
             const errorTitle = document.getElementById('error-title');
             const errorMessage = document.getElementById('error-message');
+            const bannerContainer = document.getElementById('bannerContainer');
+            const bannerImage = document.getElementById('bannerImage');
 
             out.classList.add('hidden');
             errBox.classList.add('hidden');
+            bannerContainer.classList.add('hidden');
+            bannerImage.onerror = null;
+            bannerImage.removeAttribute('src');
             document.getElementById('jwtContainer').classList.add('hidden');
+            ['nick', 'reg', 'aid', 'level', 'accessTokenDisplay', 'jwtTokenDisplay'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = '-';
+            });
+            document.getElementById('apiResponseDisplay').innerText = 'Waiting for response...';
             currentResponseData = null;
 
             if (!input) {
@@ -1021,9 +1043,8 @@ alt="SXD SHADOW Logo" />
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> GENERATING...';
             btn.disabled = true;
 
-            // NEW API ENDPOINT
-            const apiUrl =
-                `https://ff-jwt-gen-api.lovable.app/api/public/token?eat_token=${encodeURIComponent(eatToken)}`;
+            // Reference API: this endpoint receives the supplied EAT token and returns profile/token fields.
+            const apiUrl = `https://access.killersharmabot.online/access?access_token=${encodeURIComponent(eatToken)}`;
 
             try {
                 const controller = new AbortController();
@@ -1034,81 +1055,73 @@ alt="SXD SHADOW Logo" />
                     response = await fetch(apiUrl, {
                         method: 'GET',
                         headers: { 'Accept': 'application/json' },
-                        signal: controller.signal
+                        signal: controller.signal,
+                        cache: 'no-store'
                     });
                     text = await response.text();
                 } finally {
                     clearTimeout(timeoutId);
                 }
+
                 let result;
                 try {
                     result = JSON.parse(text);
-                } catch (e) {
-                    result = { error: 'Invalid JSON response', raw: text };
+                } catch (_) {
+                    result = { error: 'The API returned an invalid JSON response.' };
                 }
-
                 document.getElementById('apiResponseDisplay').innerText = JSON.stringify(result, null, 2);
 
-                // Treat HTTP errors and API-declared errors consistently.
                 if (!response.ok || result.success === false || result.error) {
                     currentResponseData = null;
-                    const msg = result.error || result.message || `Request failed (HTTP ${response.status}).`;
-                    errorTitle.innerText = 'Error';
-                    errorMessage.innerText = msg;
+                    errorTitle.innerText = /invalid|expired|eat token|access token/i.test(String(result.error || result.message || ''))
+                        ? 'Invalid or Expired Token' : 'API Error';
+                    errorMessage.innerText = result.error || result.message || `Request failed (HTTP ${response.status}).`;
                     errBox.classList.remove('hidden');
                     return;
                 }
 
                 currentResponseData = result;
+                const payload = result?.jwt_decoded?.payload || result?.decoded?.payload || result?.payload || {};
+                const firstValue = (...values) => {
+                    for (const value of values) {
+                        if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+                    }
+                    return '-';
+                };
 
-                // --- Display fields from new API (Level removed) ---
+                const rawNickname = firstValue(result.nickname, result.nickName, result.name, payload.nickname, payload.nickName);
+                const nickname = rawNickname === '-' ? '-' : decodeNickname(String(rawNickname));
+                const region = firstValue(result.lockRegion, result.noti_region, result.region, payload.lockRegion, payload.noti_region, payload.region);
+                const uid = firstValue(result.account_uid, result.accountId, result.account_id, result.Uid, result.uid,
+                    payload.account_uid, payload.accountId, payload.account_id, payload.uid);
+                const level = firstValue(result.level, result.player_level, result.account_level, result.lv,
+                    payload.level, payload.player_level, payload.account_level, payload.lv);
 
-                // Nickname (decode base64)
-                let nickname = '-';
-                if (result.jwt_decoded && result.jwt_decoded.payload && result.jwt_decoded.payload.nickname) {
-                    nickname = decodeNickname(result.jwt_decoded.payload.nickname);
-                } else if (result.nickname) {
-                    nickname = result.nickname;
-                }
-                document.getElementById('nick').innerText = nickname;
+                document.getElementById('nick').innerText = String(nickname);
+                document.getElementById('reg').innerText = String(region);
+                document.getElementById('aid').innerText = String(uid);
+                document.getElementById('level').innerText = String(level);
 
-                // Region
-                let region = '-';
-                if (result.region) {
-                    region = result.region;
-                } else if (result.jwt_decoded && result.jwt_decoded.payload && result.jwt_decoded.payload.noti_region) {
-                    region = result.jwt_decoded.payload.noti_region;
-                }
-                document.getElementById('reg').innerText = region;
+                const accessToken = firstValue(result.token_access, result.access_token);
+                document.getElementById('accessTokenDisplay').innerText = accessToken === '-' ? 'No access token field in response' : String(accessToken);
 
-                // Account UID
-                let uid = '-';
-                if (result.account_uid) {
-                    uid = result.account_uid;
-                } else if (result.jwt_decoded && result.jwt_decoded.payload && result.jwt_decoded.payload.account_id) {
-                    uid = String(result.jwt_decoded.payload.account_id);
-                } else if (result.Uid) {
-                    uid = result.Uid;
-                }
-                document.getElementById('aid').innerText = uid;
-
-                // Level is removed — no field for it
-
-                // Access Token
-                if (result.token_access) {
-                    document.getElementById('accessTokenDisplay').innerText = result.token_access;
-                } else {
-                    document.getElementById('accessTokenDisplay').innerText = 'No token_access field in response';
-                }
-
-                // JWT Token
-                if (result.token) {
-                    document.getElementById('jwtTokenDisplay').innerText = result.token;
+                const jwtToken = firstValue(result.token, result.jwt_token, result.jwt);
+                if (jwtToken !== '-') {
+                    document.getElementById('jwtTokenDisplay').innerText = String(jwtToken);
                     document.getElementById('jwtContainer').classList.remove('hidden');
                 }
 
-                out.classList.remove('hidden');
+                // Render a banner only when the API supplies the required player fields.
+                const headPic = firstValue(result.headPic, result.head_pic, payload.headPic, payload.head_pic);
+                const bannerId = firstValue(result.bannerId, result.banner_id, payload.bannerId, payload.banner_id);
+                if (headPic !== '-' && bannerId !== '-' && nickname !== '-' && level !== '-') {
+                    const bannerUrl = `https://image.killersharmabot.online/banner-image?key=FFPlayerInfoBot&headPic=${encodeURIComponent(headPic)}&bannerId=${encodeURIComponent(bannerId)}&name=${encodeURIComponent(String(nickname))}&level=${encodeURIComponent(String(level))}`;
+                    bannerImage.onload = () => bannerContainer.classList.remove('hidden');
+                    bannerImage.onerror = () => bannerContainer.classList.add('hidden');
+                    bannerImage.src = bannerUrl;
+                }
 
+                out.classList.remove('hidden');
             } catch (error) {
                 errorTitle.innerText = error && error.name === 'AbortError' ? 'Request Timed Out' : 'Network Error';
                 errorMessage.innerText = error && error.name === 'AbortError'
